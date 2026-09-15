@@ -9,3 +9,6 @@ Desktop.ini
 # Local scratch
 *.log
 tmp/
+
+# Local tooling config
+.claude/
