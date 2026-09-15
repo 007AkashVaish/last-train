@@ -42,26 +42,31 @@ your helmet lamp becomes the only thing between you and whatever is still moving
 
 ### Who you are fighting
 
-People, not machines. Every figure is articulated the way a body is — hips drive
-thighs, thighs drive shins, shins drive boots, and the torso counter-rotates
-against the stride. Gear sits on top of the frame, so silhouettes differ without
-new skeletons, and skin tone and uniform dye are picked per unit so a squad never
-looks like one man copied six times. When they go down they collapse under their
-own weight and stay where they fell.
+A black-clad tactical unit. Every figure is built from tapered cylinders and
+ellipsoids with smooth normals — so limbs, torsos and heads actually read as round
+— and articulated the way a body is: hips drive thighs, thighs drive shins, shins
+drive boots, the torso counter-rotates against the stride and the head tracks you.
+Knee pads, shin guards, elbow pads and moulded chest plates sit over charcoal
+fatigues; the only colour on them is the eyewear. Skin tone and dye are picked per
+unit so a squad is never one man copied six times. When they go down they collapse
+under their own weight and stay where they fell.
 
 | Unit | Notes |
 | --- | --- |
-| **Patrol** | Line trooper — helmet, plate carrier, rifle. |
-| **Runner** | Hooded, no armour, closes fast with a blade. |
-| **Breacher** | Heavy carrier and a riot shield; hit the flanks. |
-| **Marksman** | Scrim and a scoped DMR. Laser tell before the shot. |
+| **Patrol** | Helmet, twin red goggle lenses, plate carrier, rifle. |
+| **Runner** | Hooded, goggles, no armour — closes fast with a blade. |
+| **Breacher** | Respirator under an orange visor, pauldrons, riot shield. Hit the flanks. |
+| **Marksman** | Cap and scrim, magenta lenses, scoped DMR. Laser tell before the shot. |
 | **Drone** | The one machine — a ducted quadcopter spotter. |
-| **Warden** | Boss. Powered assault suit with three exposed cells. |
+| **Warden** | Boss. Sealed helmet with a cyan visor, powered suit, three exposed cells. |
+
+Figures beyond 12 m and 24 m drop mesh detail automatically, so a full squad does
+not cost a full frame.
 
 ### Weapons
 
-Each is a full assembly whose bolt rides back on every shot and whose magazine
-physically leaves the well on a reload:
+Seven, each a full assembly whose bolt rides back on every shot and whose magazine
+physically leaves the well on a reload. They unlock across the campaign:
 
 | | Weapon | Character |
 | --- | --- | --- |
@@ -69,6 +74,9 @@ physically leaves the well on a reload:
 | `2` | **SG-12** | Ten-pellet breaching shotgun. Devastating inside 24 m. |
 | `3` | **RAIL-9** | Rail lance. 155 damage, punches through six bodies. |
 | `4` | **ARC-3** | Arc projector. Chains to three nearby targets. |
+| `5` | **MP-9** | Machine pistol. 36 rounds, very fast, all crack and no body. |
+| `6` | **GAU-2** | Rotary cannon. Winds up under the trigger, slows you while it spins. |
+| `7` | **RPG-7** | Rocket launcher. A simulated projectile — dodgeable, and it hits whatever is in the way. |
 
 Fifteen roguelite modifications, offered three at a time after every odd wave.
 
@@ -86,7 +94,7 @@ Fifteen roguelite modifications, offered three at a time after every odd wave.
 | `F` | Helmet lamp |
 | `G` | Arc charge (proximity fused) |
 | `R` | Reload |
-| `1`–`4` / wheel | Weapons |
+| `1`–`7` / wheel | Weapons |
 | `Esc` / `P` | Pause and settings |
 
 Mouse sensitivity, field of view, aim assist and volume are in the settings panel
@@ -101,12 +109,11 @@ aims, and holding the trigger fires every weapon rather than only the automatics
 Crouch, bash, lamp, dash, charge, reload and weapon swap all have thumb buttons,
 laid out inside the safe area so nothing hides under a notch or a home bar.
 
-- **Aim assist** is on by default on touch and adjustable in settings — it nudges
-  the view toward whoever is already near the reticle, harder while you are firing
+- **Aim assist** is on by default on touch and adjustable in settings
 - Entering a run asks for **fullscreen and a landscape lock**, and a portrait
   notice pauses the game if you turn the phone upright
 - The backing store is **capped below native resolution** and reflections are off
-  by default on handhelds, so fill cost stays sane
+  by default on handhelds
 - **Haptics** on taking a hit and on landing one
 
 ---
@@ -150,9 +157,9 @@ sketch:
 - **damped resonator banks** for the mechanical action, brass and impacts
 - **tanh saturation**, the way a real report clips whatever records it
 
-Twenty-six sounds in up to four variants each, so sustained fire never loops.
+Twenty-nine sounds in up to four variants each, so sustained fire never loops.
 Rendering happens in small slices during idle frames, so the first shot is never
-late.
+late. The rotary cannon carries a live whine that tracks its spin.
 
 Every shot is followed by its own **tunnel slap** — a darker, wider copy arriving a
 beat later off the far end of the platform. The reverb underneath it is an impulse
@@ -161,9 +168,8 @@ reflections, a flutter echo between the parallel walls about 10 m apart, and a t
 that loses its top end first. Distance buys propagation delay at the speed of
 sound, air absorption and a wetter send.
 
-Reloads play real foley against their own duration — magazine out, magazine in,
-bolt release — and footsteps pick up whether you are on concrete or in standing
-water.
+Reloads play real foley against their own duration, and footsteps pick up whether
+you are on concrete or in standing water.
 
 ## Debugging
 

@@ -2449,7 +2449,36 @@ function powerUp() { return renderFoley(out => {
   }
 }, 1.2); }
 
+/* Light, fast report: the SMG is all crack and very little body. */
+function shotSMG() { return renderShot({
+  dur: .70, blast: .9, blastT: .0008, blastB: 1.7, crack: .9, crackDur: .00036,
+  gasDecay: .015, gas0: 9500, gas1: 1700, gasGain: .78,
+  boomF0: 175, boomF1: 98, boomDecay: .08, boomGain: .40, drive: 2.5,
+  actions: [{ t: .03, gain: .09, res: [[2900,.010,1],[4400,.007,.6]], noise: [.010, 3400, 2100, 4, .04] }] }); }
+/* Rotary cannon: each round is short and dense because the next one lands
+   34 ms later - the tail is provided by the barrels around it. */
+function shotMG() { return renderShot({
+  dur: .42, blast: 1.0, blastT: .0010, blastB: 1.6, crack: .8, crackDur: .0004,
+  gasDecay: .018, gas0: 8000, gas1: 1200, gasGain: .85,
+  boomF0: 150, boomF1: 82, boomDecay: .09, boomGain: .55, drive: 2.9 }); }
+/* Rocket launch: a soft thud, the igniter, then the motor tearing away. */
+function shotRPG() { return renderShot({
+  dur: 1.5, blast: .7, blastT: .0040, blastB: 1.2, crack: .2, crackDur: .0009,
+  gasDecay: .12, gas0: 3200, gas1: 500, gasGain: .9,
+  boomF0: 92, boomF1: 46, boomDecay: .35, boomGain: .75, drive: 2.8,
+  extra(out) {
+    const start = Math.floor(.04 * SR), n = Math.min(out.length - start, Math.floor(1.1 * SR));
+    const bq = makeBiquad();
+    for (let i = 0; i < n; i++) {
+      const t = i / SR, env = Math.exp(-t * 2.8) * Math.min(1, t * 40);
+      if ((i & 63) === 0) bq.set('bp', 900 + 2600 * Math.exp(-t * 1.6), 1.2);
+      out[start + i] += bq.run(rnd2()) * env * 0.5;
+    }
+  } }); }
 function buildBank() {
+  queueBank('smg', 4, shotSMG);
+  queueBank('mg', 4, shotMG);
+  queueBank('rpg', 2, shotRPG);
   queueBank('ar', 4, shotAR);
   queueBank('sg', 3, shotSG);
   queueBank('rail', 3, shotRail);
@@ -2633,7 +2662,31 @@ const SHOT = {
   sg:   { crack: 2300, crackDur: .020, body: 1000, bodyEnd: 130, dur: .40, thump: 62, level: .95, wet: .5 },
   rail: { crack: 5200, crackDur: .014, body: 2600, bodyEnd: 400, dur: .30, thump: 74, level: .80, wet: .55 },
   arc:  { crack: 6200, crackDur: .010, body: 3200, bodyEnd: 900, dur: .10, thump: 150, level: .38, wet: .3 },
+  smg:  { crack: 4200, crackDur: .010, body: 1900, bodyEnd: 300, dur: .12, thump: 120, level: .45 },
+  mg:   { crack: 3800, crackDur: .010, body: 1600, bodyEnd: 280, dur: .10, thump: 110, level: .5 },
+  rpg:  { crack: 1200, crackDur: .030, body: 700,  bodyEnd: 120, dur: .6,  thump: 60,  level: .8, wet: .6 },
 };
+
+let spinNodes = null;
+function updateSpinAudio(spin) {
+  if (!audio || !soundOn) return;
+  if (!spinNodes) {
+    const o1 = audio.createOscillator(), o2 = audio.createOscillator();
+    const f = audio.createBiquadFilter(), g = audio.createGain();
+    o1.type = 'sawtooth'; o2.type = 'square';
+    f.type = 'lowpass'; f.Q.value = 2.2;
+    g.gain.value = 0;
+    o1.connect(f); o2.connect(f); f.connect(g); g.connect(dry);
+    const wg = audio.createGain(); wg.gain.value = .5; g.connect(wg); wg.connect(wet);
+    o1.start(); o2.start();
+    spinNodes = { o1, o2, f, g };
+  }
+  const t = audio.currentTime;
+  spinNodes.o1.frequency.setTargetAtTime(38 + spin * 210, t, .03);
+  spinNodes.o2.frequency.setTargetAtTime(19 + spin * 105, t, .03);
+  spinNodes.f.frequency.setTargetAtTime(220 + spin * 1900, t, .03);
+  spinNodes.g.gain.setTargetAtTime(spin > .01 ? .045 + spin * .09 : 0, t, .04);
+}
 
 /* Reload foley, scheduled against the real reload length. A token guards
    against the player swapping weapons mid-sequence. */
@@ -2668,6 +2721,11 @@ const SFX = {
            SFX.slap('rail', .24, .088, 820); },
   arc()  { if (!playBank('arc',  { vol: .8,  wet: .3 }))  return gunshot(SHOT.arc);
            SFX.slap('arc', .12, .070, 900); },
+  smg()  { if (!playBank('smg',  { vol: .8,  wet: .3, detune: .07 })) return gunshot(SHOT.smg);
+           SFX.slap('smg', .14, .078, 760); },
+  mg()   { if (!playBank('mg',   { vol: .62, wet: .32, detune: .09 })) gunshot(SHOT.mg); },
+  rpg()  { if (!playBank('rpg',  { vol: 1.0, wet: .55 })) return gunshot(SHOT.rpg);
+           SFX.slap('rpg', .3, .12, 480); },
 
   /* What the round hits is most of its character. */
   impact(kind, sp) {
@@ -2814,32 +2872,43 @@ const WEAPONS = [
     sound:'ar', tracer:[1,.72,.32], unlock:0 },
   { id:'sg',   key:'2', name:'SG-12',  full:'BREACH SHOTGUN', mag:7,  rof:.62,  reload:1.95, dmg:17, head:1.9,
     pellets:10, spread:.078, adsSpread:.046, kick:.20, shake:.42, range:24, pierce:0, auto:false, zoom:.9,
-    sound:'sg', tracer:[1,.6,.24], unlock:2, knock:2.6 },
+    sound:'sg', tracer:[1,.6,.24], unlock:3, knock:2.6 },
   { id:'rail', key:'3', name:'RAIL-9', full:'RAIL LANCE',     mag:5,  rof:.90,  reload:1.90, dmg:155, head:2.0,
     pellets:1, spread:0, adsSpread:0, kick:.17, shake:.5, range:95, pierce:6, auto:false, zoom:.5,
     sound:'rail', tracer:[.62,.88,1], unlock:4, beam:true },
   { id:'arc',  key:'4', name:'ARC-3',  full:'ARC PROJECTOR',  mag:44, rof:.145, reload:1.65, dmg:27, head:1.4,
     pellets:1, spread:.016, adsSpread:.007, kick:.032, shake:.09, range:26, pierce:0, auto:true, zoom:.82,
     sound:'arc', tracer:[.66,.86,1], unlock:6, chain:3, chainRange:6.4 },
+  { id:'smg',  key:'5', name:'MP-9',   full:'MACHINE PISTOL',  mag:36, rof:.062, reload:1.15, dmg:19, head:2.4,
+    pellets:1, spread:.021, adsSpread:.008, kick:.026, shake:.07, range:34, pierce:0, auto:true, zoom:.86,
+    sound:'smg', tracer:[1,.8,.42], unlock:2 },
+  /* The rotary cannon has to spin up, and walking with it is slow. */
+  { id:'mg',   key:'6', name:'GAU-2',  full:'ROTARY CANNON',   mag:180, rof:.034, reload:3.6, dmg:15, head:1.5,
+    pellets:1, spread:.052, adsSpread:.038, kick:.018, shake:.15, range:60, pierce:1, auto:true, zoom:.96,
+    sound:'mg', tracer:[1,.62,.26], unlock:5, spinup:.85, slow:.55 },
+  /* A projectile, not a ray: the round flies, then everything near it goes. */
+  { id:'rpg',  key:'7', name:'RPG-7',  full:'ROCKET LAUNCHER', mag:1, rof:1.1, reload:2.9, dmg:0, head:1,
+    pellets:0, spread:0, adsSpread:0, kick:.32, shake:.7, range:0, pierce:0, auto:false, zoom:.72,
+    sound:'rpg', tracer:[1,.7,.3], unlock:7, rocket:true },
 ];
 const WEAPON_BY_ID = {}; WEAPONS.forEach((w, i) => { w.index = i; WEAPON_BY_ID[w.id] = w; });
 
 const ENEMY = {
   sentry: { hp:92, speed:1.36, radius:.36, eye:1.53, body:.98, hr:.28, br:.46, score:100, dmg:11,
-            cool:[2.05,1.15], range:26, keep:5.6, tell:.62, name:'PATROL', color:[.52,.61,.56], optic:[1,.36,.12] },
+            cool:[2.05,1.15], range:26, keep:5.6, tell:.62, name:'PATROL', color:[.56,.58,.60], optic:[1,.18,.12] },
   rusher: { hp:52,  speed:3.45, radius:.32, eye:1.36, body:.86, hr:.25, br:.40, score:130, dmg:17,
-            melee:true, keep:0, name:'RUNNER', color:[.66,.36,.30], optic:[1,.22,.14], accel:1.7 },
+            melee:true, keep:0, name:'RUNNER', color:[.60,.54,.52], optic:[1,.30,.10], accel:1.7 },
   drone:  { hp:58,  speed:2.55, radius:.34, eye:.18, body:0, hr:.27, br:.40, score:160, dmg:8, fly:2.55,
             cool:[1.35,.7], range:22, keep:7.2, tell:.4, name:'DRONE', color:[.44,.56,.60], optic:[.4,.9,1] },
   heavy:  { hp:340, speed:1.00, radius:.56, eye:1.90, body:1.15, hr:.34, br:.72, score:420, dmg:15,
             cool:[2.9,1.0], range:24, keep:6.4, tell:.7, burst:3, armor:.26, name:'BREACHER',
-            color:[.46,.52,.5], optic:[1,.5,.15] },
+            color:[.52,.54,.56], optic:[1,.55,.12] },
   sniper: { hp:74,  speed:1.15, radius:.34, eye:1.62, body:1.02, hr:.26, br:.42, score:230, dmg:31,
             cool:[3.3,.9], range:60, keep:15, tell:1.15, laser:true, name:'MARKSMAN',
-            color:[.4,.5,.56], optic:[.5,1,.7] },
+            color:[.50,.52,.58], optic:[1,.22,.62] },
   warden: { hp:3400, speed:.92, radius:1.35, eye:3.30, body:1.9, hr:.9, br:1.5, score:3000, dmg:22,
             cool:[2.2,.6], range:40, keep:8.5, tell:.8, boss:true, armor:.55, name:'WARDEN',
-            color:[.34,.4,.42], optic:[1,.28,.12] },
+            color:[.40,.44,.50], optic:[.35,.85,1] },
 };
 
 const WAVES = [
@@ -2915,14 +2984,14 @@ let mods = freshMods();
 const player = {
   x:-5.2, z:24, y:1.66, groundY:0, yaw:.03, pitch:0,
   hp:100, shield:0, weapon:0,
-  owned:[true,false,false,false], ammo:[30,7,5,44],
+  owned:WEAPONS.map((w, i) => i === 0), ammo:WEAPONS.map(w => w.mag),
   reload:0, reloadTotal:1, shotTimer:0, recoil:0, recoilYaw:0, recoilPitch:0,
   invuln:0, bob:0, step:0, sprinting:false, ads:0,
   dash:0, dashCd:0, dashX:0, dashZ:0, dashHits:null,
   nades:3, nadeCd:0,
   combo:1, comboKills:0, comboTimer:0, bestCombo:1,
   regenTimer:0, walking:false, lastDamageDir:0, strafeAmt:0,
-  crouch:0, torch:false, meleeT:0, meleeCd:0, meleeDone:true, lastX:-5.2, lastZ:24,
+  crouch:0, spin:0, torch:false, meleeT:0, meleeCd:0, meleeDone:true, lastX:-5.2, lastZ:24,
 };
 
 let state = 'menu';
@@ -2981,6 +3050,47 @@ function debris(x, y, z, color, count) {
       rot: rand(TAU), spin: rand(9,-9) });
   }
 }
+/* Rockets are simulated, not traced: they can be dodged, and they hit
+   whatever is in the way rather than what was aimed at. */
+const rockets = [];
+function launchRocket(from, dir) {
+  rockets.push({ x: from[0], y: from[1], z: from[2],
+                 vx: dir[0] * 32, vy: dir[1] * 32, vz: dir[2] * 32, life: 5,
+                 yaw: Math.atan2(dir[0], -dir[2]), pitch: Math.asin(clamp(dir[1], -1, 1)), age: 0 });
+  /* Backblast out of the tube behind you. */
+  smoke(player.x - dir[0] * 1.4, player.y - .35, player.z - dir[2] * 1.4, [.52, .52, .50], 10, .5, 1.3);
+  smoke(from[0], from[1], from[2], [.6, .58, .55], 5, .25, .9);
+  addLight(from[0], from[1], from[2], [1, .72, .38], 10, .18);
+}
+function detonateRocket(r, x, y, z) {
+  explode(x, y, z, 5.2, 240, false);
+  const i = rockets.indexOf(r); if (i >= 0) rockets.splice(i, 1);
+}
+function updateRockets(dt) {
+  for (let i = rockets.length - 1; i >= 0; i--) {
+    const r = rockets[i];
+    const sp = Math.hypot(r.vx, r.vy, r.vz) || 1;
+    const dir = [r.vx / sp, r.vy / sp, r.vz / sp], o = [r.x, r.y, r.z];
+    const travel = sp * dt;
+    const wallT = wallDistance(o, dir);
+    const hits = gatherHits(o, dir, Math.min(wallT, travel + .3));
+    if (hits.length && hits[0].t <= travel + .3) {
+      detonateRocket(r, o[0] + dir[0] * hits[0].t, o[1] + dir[1] * hits[0].t, o[2] + dir[2] * hits[0].t);
+      continue;
+    }
+    if (wallT <= travel) {
+      detonateRocket(r, o[0] + dir[0] * wallT, o[1] + dir[1] * wallT, o[2] + dir[2] * wallT);
+      continue;
+    }
+    r.x += r.vx * dt; r.y += r.vy * dt; r.z += r.vz * dt;
+    r.age += dt; r.life -= dt;
+    /* Motor exhaust: a lit trail that hangs in the air. */
+    smoke(r.x - dir[0] * .4, r.y - dir[1] * .4, r.z - dir[2] * .4, [.62, .58, .54], 1, .05, .9);
+    addLight(r.x, r.y, r.z, [1, .62, .28], 4.5, .06);
+    if (r.life <= 0) detonateRocket(r, r.x, r.y, r.z);
+  }
+}
+
 const casings = [];
 function ejectCasing(x, y, z, yaw, kind) {
   const right = [Math.cos(yaw), 0, Math.sin(yaw)];
@@ -3114,7 +3224,7 @@ function openCache(c) {
   if (roll < .3)      { player.hp = Math.min(mods.maxHp, player.hp + 45); feed('CACHE · INTEGRITY +45'); }
   else if (roll < .55){ player.shield = Math.min(120, player.shield + 60); feed('CACHE · SHIELD +60'); }
   else if (roll < .8) { player.nades = Math.min(mods.nadeMax + 2, player.nades + 2);
-                        for (let i = 0; i < 4; i++) player.ammo[i] = magSize(WEAPONS[i]);
+                        for (let i = 0; i < WEAPONS.length; i++) player.ammo[i] = magSize(WEAPONS[i]);
                         feed('CACHE · ORDNANCE RESTOCKED'); }
   else                { score += 750; feed('CACHE · SALVAGE', 750); }
   score += 250;
@@ -3340,7 +3450,7 @@ function collectPickup(p) {
   if (p.kind === 'health') { player.hp = Math.min(mods.maxHp, player.hp + 30); feed('INTEGRITY +30'); }
   else if (p.kind === 'shield') { player.shield = Math.min(120, player.shield + 45); feed('SHIELD +45'); }
   else { const w = curWeapon(); player.ammo[player.weapon] = magSize(w);
-         for (let i = 0; i < 4; i++) if (i !== player.weapon) player.ammo[i] = magSize(WEAPONS[i]);
+         for (let i = 0; i < WEAPONS.length; i++) if (i !== player.weapon) player.ammo[i] = magSize(WEAPONS[i]);
          if (player.reload > 0) player.reload = 0; feed('MAGAZINES RESTOCKED'); }
   SFX.pickup();
   addLight(p.x, p.y, p.z, p.kind === 'health' ? [.4,1,.6] : p.kind === 'shield' ? [.4,.8,1] : [1,.7,.3], 4, .3);
@@ -3364,7 +3474,8 @@ function switchWeapon(index, relative) {
   let i = index;
   if (relative) {
     i = player.weapon;
-    for (let k = 0; k < 4; k++) { i = (i + (index > 0 ? 1 : 3)) % 4; if (player.owned[i]) break; }
+    const n = WEAPONS.length;
+    for (let k = 0; k < n; k++) { i = (i + (index > 0 ? 1 : n - 1)) % n; if (player.owned[i]) break; }
   }
   if (i === player.weapon || !player.owned[i]) return;
   player.weapon = i;
@@ -3416,6 +3527,7 @@ function arcChain(fromEnemy, damage, depth, w) {
 function fire() {
   if (state !== 'playing' || player.reload > 0 || player.shotTimer > 0 || player.dash > 0) return;
   const w = curWeapon(), slot = player.weapon;
+  if (w.spinup && player.spin < .999) return;             // barrels still coming up to speed
   if (player.ammo[slot] <= 0) { SFX.dry(); startReload(); return; }
   player.ammo[slot]--;
   player.shotTimer = w.rof * mods.rof;
@@ -3438,14 +3550,19 @@ function fire() {
                   o[1] + base[1]*.62 - .14,
                   o[2] + base[2]*.62 + right[2]*.16 - up[2]*.14];
   addLight(muzzle[0], muzzle[1], muzzle[2], [1.6, 1.05, .5], 7.5, .09);
-  ejectCasing(o[0] + base[0]*.2 + right[0]*.22, o[1] - .10, o[2] + base[2]*.2 + right[2]*.22,
-              aimYaw, w.id === 'sg' ? 1 : 0);
+  if (!w.rocket) ejectCasing(o[0] + base[0]*.2 + right[0]*.22, o[1] - .10, o[2] + base[2]*.2 + right[2]*.22,
+                             aimYaw, w.id === 'sg' ? 1 : 0);
   if (w.id !== 'arc') smoke(muzzle[0], muzzle[1], muzzle[2], [.42, .44, .43], w.id === 'sg' ? 4 : 2, .10, .45);
   SFX[w.sound]();
   player.recoil = Math.min(.34, player.recoil + kick);
   player.recoilPitch += kick * .55;
   player.recoilYaw += rand(kick * .3, -kick * .3);
   shake(w.shake * (ads ? .7 : 1));
+  if (w.rocket) {
+    launchRocket(muzzle, base);
+    updateHud();
+    return;
+  }
   for (const e of enemies) e.chained = false;
 
   const dmgMul = mods.dmg * (1 + (player.combo - 1) * mods.comboDmg * 4);
@@ -3737,6 +3854,13 @@ function simulate(dt) {
     if (flicker <= 0) power = powerTarget;
   } else power += (powerTarget - power) * Math.min(1, dt * (powerTarget < .5 ? 9 : 3));
   P.flash = Math.max(0, (P.flash || 0) - dt * 9);
+  /* The rotary cannon winds up while the trigger is held and coasts down after. */
+  const wsp = curWeapon();
+  if (wsp.spinup) {
+    const want = shootHeld && P.reload <= 0 && P.ammo[P.weapon] > 0;
+    P.spin = clamp(P.spin + (want ? dt / wsp.spinup : -dt / (wsp.spinup * 1.7)), 0, 1);
+  } else P.spin = 0;
+  updateSpinAudio(P.spin);
   hitMarkTime = Math.max(0, hitMarkTime - dt);
   damageFlash = Math.max(0, damageFlash - dt * 2.1);
   noticeTime = Math.max(0, noticeTime - dt);
@@ -3795,7 +3919,7 @@ function simulate(dt) {
     }
     if (P.dash <= 0) P.dashCd = 2.4 * mods.dashCd;
   } else {
-    const base = P.sprinting ? 6.2 : 4.1;
+    const base = (P.sprinting ? 6.2 : 4.1) * (1 - (curWeapon().slow || 0) * P.spin);
     const speed = base * mods.speed * (1 - P.ads * .38) * (1 - P.crouch * .50) * dt;
     slide(P, (Math.sin(P.yaw) * fwd + Math.cos(P.yaw) * str) * speed,
              (-Math.cos(P.yaw) * fwd + Math.sin(P.yaw) * str) * speed, .3, false);
@@ -3906,6 +4030,7 @@ function simulate(dt) {
   updateCaches(dt);
   updateCasings(dt);
   updateCorpses(dt);
+  updateRockets(dt);
   for (let i = pickups.length - 1; i >= 0; i--) {
     const p = pickups[i];
     p.life -= dt; p.spin += dt * 2.2; p.bob += dt * 3;
@@ -3980,18 +4105,18 @@ function begin() {
   mods = freshMods();
   Object.assign(player, {
     x:-5.2, z:24, y:1.66, groundY:0, yaw:.03, pitch:0, hp:100, shield:0, weapon:0,
-    owned:[true,false,false,false], ammo:[magSize(WEAPONS[0]), WEAPONS[1].mag, WEAPONS[2].mag, WEAPONS[3].mag],
+    owned:WEAPONS.map((w, i) => i === 0), ammo:WEAPONS.map((w, i) => i === 0 ? magSize(w) : w.mag),
     reload:0, shotTimer:0, recoil:0, recoilYaw:0, recoilPitch:0, invuln:1.5, bob:0, step:0,
     sprinting:false, ads:0, dash:0, dashCd:0, nades:3, nadeCd:0, combo:1, comboKills:0, comboTimer:0,
     bestCombo:1, regenTimer:0, walking:false, flash:0, strafeAmt:0,
-    crouch:0, torch:false, meleeT:0, meleeCd:0, meleeDone:true, lastX:-5.2, lastZ:24,
+    crouch:0, spin:0, torch:false, meleeT:0, meleeCd:0, meleeDone:true, lastX:-5.2, lastZ:24,
   });
   power = 1; powerTarget = 1; outage = 0; flicker = 0; outageCd = 45; torchLevel = 0;
   runStats = { headshots:0, melee:0, caches:0, untouched:0, bestBlast:0, distance:0, hitThisWave:false };
   wave = 0; score = 0; kills = 0; shotsFired = 0; shotsHit = 0; elapsed = 0;
   enemies = []; bolts = []; particles = []; decals = []; pickups = []; grenades = []; beams = []; shocks = [];
   spawnQueue = []; transition = 0; boss = null; dynLights = []; dirIndicators = []; caches = [];
-  casings.length = 0; warp = null; corpses.length = 0;
+  casings.length = 0; warp = null; corpses.length = 0; rockets.length = 0;
   trauma = 0; hitStop = 0; slowMo = 0; damageFlash = 0; fadeIn = 0;
   $('boss').hidden = true; $('feed').innerHTML = '';
   state = 'playing';
@@ -4018,7 +4143,7 @@ function title() {
   state = 'menu'; clearInputs();
   enemies = []; bolts = []; particles = []; beams = []; shocks = []; pickups = []; grenades = [];
   dynLights = []; boss = null; damageFlash = 0; caches = []; casings.length = 0; warp = null;
-  corpses.length = 0;
+  corpses.length = 0; rockets.length = 0;
   setMusicIntensity(0);
   setScreens({ menu: true });
   if (document.pointerLockElement === canvas) document.exitPointerLock && document.exitPointerLock();
@@ -4135,7 +4260,7 @@ function chooseUpgrade(i) {
   u.apply(mods);
   if (mods.maxHp !== before) player.hp = mods.maxHp;
   if (u.id === 'weave') player.hp = mods.maxHp;
-  if (u.id === 'band') for (let k = 0; k < 4; k++) player.ammo[k] = magSize(WEAPONS[k]);
+  if (u.id === 'band') for (let k = 0; k < WEAPONS.length; k++) player.ammo[k] = magSize(WEAPONS[k]);
   feed('INSTALLED · ' + u.name.toUpperCase());
   SFX.reloaded();
   state = 'playing';
@@ -4255,7 +4380,7 @@ addEventListener('keydown', e => {
   else if (e.code === 'KeyF') toggleTorch();
   else if (e.code === 'KeyQ') switchWeapon(-1, true);
   else {
-    const slot = ['Digit1','Digit2','Digit3','Digit4'].indexOf(e.code);
+    const slot = ['Digit1','Digit2','Digit3','Digit4','Digit5','Digit6','Digit7'].indexOf(e.code);
     if (slot >= 0) switchWeapon(slot, false);
   }
 });
@@ -4482,48 +4607,147 @@ for (const b of document.querySelectorAll('.quality button')) {
    `e.fall` rotates the whole body about the ankles, which is what turns a
    standing figure into one collapsing to the floor.
    ========================================================================= */
-function part(out, e, x, y, z, sx, sy, sz, color, tileId, glow, spec, tilt) {
-  let py = y, pz = z, extra = 0;
-  if (e.fall) {
-    /* Rigid rotation about the feet: +y swings toward +z as the body drops. */
-    const c = Math.cos(e.fall), s = Math.sin(e.fall);
-    py = y * c - z * s; pz = y * s + z * c; extra = e.fall;
+/* =========================================================================
+   ROUND PRIMITIVES
+   A box reads as a crate no matter how it is tinted. Limbs, torsos and
+   heads are built from tapered cylinders and ellipsoids with smooth normals,
+   so lighting wraps around them and eight sides are enough to read as round.
+   Same 15-float vertex layout as box(), same rot/tilt convention.
+   ========================================================================= */
+const ROUND = coarse ? 6 : 8;
+let ROUND_NOW = ROUND;              // per-figure detail, set by buildUnit from distance
+function cyl(out, x, y, z, rb, rt, h, color, tileId, glow, rot, rep, spec, refl, tilt, sides, zs) {
+  color = color || WHITE;
+  tileId = tileId === undefined ? 15 : tileId;
+  glow = glow || 0; rot = rot || 0; rep = rep || 0; tilt = tilt || 0;
+  spec = spec === undefined ? .22 : spec; refl = refl || 0;
+  sides = sides || ROUND_NOW; zs = zs || 1;
+  const co = Math.cos(rot), si = Math.sin(rot), ct = Math.cos(tilt), st = Math.sin(tilt);
+  const hh = h / 2;
+  const xf = (lx, ly, lz) => { const y1 = ly * ct - lz * st, z1 = ly * st + lz * ct;
+                               return [x + lx * co + z1 * si, y + y1, z - lx * si + z1 * co]; };
+  const nf = (nx, ny, nz) => { const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
+                               const y1 = ny * ct - nz * st, z1 = ny * st + nz * ct;
+                               return [nx * co + z1 * si, y1, -nx * si + z1 * co]; };
+  const push = (p, n, u, v) => out.push(p[0], p[1], p[2], n[0], n[1], n[2],
+                                        color[0], color[1], color[2], u, v, tileId, glow, spec, refl);
+  const uSpan = rep ? rep * Math.PI * (rb + rt) : 1, vSpan = rep ? rep * h : 1;
+  const slope = (rb - rt) / Math.max(h, 1e-4);
+  for (let i = 0; i < sides; i++) {
+    const a0 = i / sides * TAU, a1 = (i + 1) / sides * TAU;
+    const c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
+    const b0 = xf(c0 * rb, -hh, s0 * rb * zs), b1 = xf(c1 * rb, -hh, s1 * rb * zs);
+    const t0 = xf(c0 * rt,  hh, s0 * rt * zs), t1 = xf(c1 * rt,  hh, s1 * rt * zs);
+    const n0 = nf(c0, slope, s0 / zs), n1 = nf(c1, slope, s1 / zs);
+    const u0 = i / sides * uSpan, u1 = (i + 1) / sides * uSpan;
+    push(b0, n0, u0, 0); push(b1, n1, u1, 0); push(t1, n1, u1, vSpan);
+    push(b0, n0, u0, 0); push(t1, n1, u1, vSpan); push(t0, n0, u0, vSpan);
   }
-  const co = Math.cos(e.yaw), si = Math.sin(e.yaw);
-  box(out, e.x + x * co + pz * si, e.y + py, e.z - x * si + pz * co,
-      sx, sy, sz, color, tileId === undefined ? T_CLOTH : tileId, glow || 0, e.yaw, 0,
-      spec === undefined ? .22 : spec, 0, (tilt || 0) + extra);
+  const nt = nf(0, 1, 0), nb = nf(0, -1, 0), ctop = xf(0, hh, 0), cbot = xf(0, -hh, 0);
+  for (let i = 0; i < sides; i++) {
+    const a0 = i / sides * TAU, a1 = (i + 1) / sides * TAU;
+    const c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
+    push(ctop, nt, .5, .5); push(xf(c0 * rt, hh, s0 * rt * zs), nt, .5 + c0 * .5, .5 + s0 * .5);
+    push(xf(c1 * rt, hh, s1 * rt * zs), nt, .5 + c1 * .5, .5 + s1 * .5);
+    push(cbot, nb, .5, .5); push(xf(c1 * rb, -hh, s1 * rb * zs), nb, .5 + c1 * .5, .5 + s1 * .5);
+    push(xf(c0 * rb, -hh, s0 * rb * zs), nb, .5 + c0 * .5, .5 + s0 * .5);
+  }
 }
-/* Five skin tones and a few uniform dyes, picked off the unit's seed so a
-   squad never looks like one man copied six times. */
+/* Ellipsoid, optionally cut to a band of latitude (helmets are hemispheres). */
+function sph(out, x, y, z, rx, ry, rz, color, tileId, glow, rot, spec, tilt, segs, rings, latMin, latMax) {
+  color = color || WHITE;
+  tileId = tileId === undefined ? 15 : tileId;
+  glow = glow || 0; rot = rot || 0; tilt = tilt || 0;
+  spec = spec === undefined ? .22 : spec;
+  /* Anything under 9 cm across is a joint: it can be far coarser and still read. */
+  const tiny = Math.max(rx, ry, rz) < .09;
+  segs = segs || (tiny ? Math.max(5, ROUND_NOW - 2) : ROUND_NOW);
+  rings = rings || (tiny ? 2 : Math.max(3, ROUND_NOW >> 1));
+  latMin = latMin === undefined ? -1 : latMin; latMax = latMax === undefined ? 1 : latMax;
+  const co = Math.cos(rot), si = Math.sin(rot), ct = Math.cos(tilt), st = Math.sin(tilt);
+  const xf = (lx, ly, lz) => { const y1 = ly * ct - lz * st, z1 = ly * st + lz * ct;
+                               return [x + lx * co + z1 * si, y + y1, z - lx * si + z1 * co]; };
+  const nf = (nx, ny, nz) => { const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
+                               const y1 = ny * ct - nz * st, z1 = ny * st + nz * ct;
+                               return [nx * co + z1 * si, y1, -nx * si + z1 * co]; };
+  const push = (p, n, u, v) => out.push(p[0], p[1], p[2], n[0], n[1], n[2],
+                                        color[0], color[1], color[2], u, v, tileId, glow, spec, 0);
+  const at = (ph, th) => {
+    const cp = Math.cos(ph), sp = Math.sin(ph), cth = Math.cos(th), sth = Math.sin(th);
+    return [xf(rx * cp * cth, ry * sp, rz * cp * sth), nf(cp * cth / rx, sp / ry, cp * sth / rz)];
+  };
+  for (let i = 0; i < rings; i++) {
+    const p0 = lerp(latMin, latMax, i / rings) * Math.PI / 2;
+    const p1 = lerp(latMin, latMax, (i + 1) / rings) * Math.PI / 2;
+    for (let j = 0; j < segs; j++) {
+      const a0 = j / segs * TAU, a1 = (j + 1) / segs * TAU;
+      const A = at(p0, a0), B = at(p0, a1), C = at(p1, a0), D = at(p1, a1);
+      const u0 = j / segs, u1 = (j + 1) / segs, v0 = i / rings, v1 = (i + 1) / rings;
+      push(A[0], A[1], u0, v0); push(B[0], B[1], u1, v0); push(D[0], D[1], u1, v1);
+      push(A[0], A[1], u0, v0); push(D[0], D[1], u1, v1); push(C[0], C[1], u0, v1);
+    }
+  }
+}
+
+/* =========================================================================
+   HOSTILES
+   People, not machines. Hips drive thighs, thighs drive shins, shins drive
+   boots; the torso counter-rotates against the stride and the head tracks
+   you. Gear sits on top of the frame, so silhouettes differ without new
+   skeletons. `e.fall` rotates the whole body about the ankles - a kill
+   becomes a collapse.
+   ========================================================================= */
 const T_CLOTH = 16, T_SKIN = 17, T_LEATHER = 18, T_GEAR = 19, T_STRAP = 20, T_GUN = 21;
 const SKIN  = [[.78,.60,.47], [.62,.45,.34], [.45,.31,.23], [.86,.70,.57], [.34,.23,.18]];
-const CLOTH = [[.30,.32,.27], [.26,.28,.30], [.34,.31,.25], [.22,.25,.24], [.31,.27,.24]];
+const CLOTH = [[.13,.13,.14], [.11,.12,.13], [.15,.14,.13], [.10,.11,.12], [.14,.13,.12]];
 function unitTint(e) {
   if (e.flash > 0) return [1, .88, .74];
   const c = e.def.color;
   const hurt = e.hp / e.maxHp;
   return hurt < .45 ? [c[0] * .82 + .08, c[1] * .74, c[2] * .70] : c;
 }
+/* Local offset -> world, honouring yaw and the collapse rotation. */
+function bodyPoint(e, x, y, z) {
+  let py = y, pz = z;
+  if (e.fall) { const c = Math.cos(e.fall), s = Math.sin(e.fall); py = y * c - z * s; pz = y * s + z * c; }
+  const co = Math.cos(e.yaw), si = Math.sin(e.yaw);
+  return [e.x + x * co + pz * si, e.y + py, e.z - x * si + pz * co];
+}
+function part(out, e, x, y, z, sx, sy, sz, color, tileId, glow, spec, tilt) {
+  const p = bodyPoint(e, x, y, z);
+  box(out, p[0], p[1], p[2], sx, sy, sz, color, tileId === undefined ? T_CLOTH : tileId, glow || 0,
+      e.yaw, 0, spec === undefined ? .22 : spec, 0, (tilt || 0) + (e.fall || 0));
+}
+function partCyl(out, e, x, y, z, rb, rt, h, color, tileId, glow, spec, tilt, zs) {
+  const p = bodyPoint(e, x, y, z);
+  cyl(out, p[0], p[1], p[2], rb, rt, h, color, tileId === undefined ? T_CLOTH : tileId, glow || 0,
+      e.yaw, 0, spec === undefined ? .22 : spec, 0, (tilt || 0) + (e.fall || 0), ROUND, zs || 1);
+}
+function partSph(out, e, x, y, z, rx, ry, rz, color, tileId, glow, spec, tilt, latMin, latMax) {
+  const p = bodyPoint(e, x, y, z);
+  sph(out, p[0], p[1], p[2], rx, ry, rz, color, tileId === undefined ? T_SKIN : tileId, glow || 0,
+      e.yaw, spec === undefined ? .22 : spec, (tilt || 0) + (e.fall || 0), ROUND, undefined, latMin, latMax);
+}
 
 function buildHuman(out, shadowOut, e, t) {
   const d = e.def;
   const hurt = e.maxHp ? e.hp / e.maxHp : 0;
-  const idx = Math.abs(Math.floor(e.seed * 37)) % SKIN.length;
-  const skin = SKIN[idx];
-  const cloth = e.def.boss ? [.20,.22,.23] : CLOTH[Math.abs(Math.floor(e.seed * 71)) % CLOTH.length];
+  const skin = SKIN[Math.abs(Math.floor(e.seed * 37)) % SKIN.length];
+  const cloth = d.boss ? [.20,.22,.23] : CLOTH[Math.abs(Math.floor(e.seed * 71)) % CLOTH.length];
   const tint = unitTint(e);
-  const gear  = [tint[0] * .66, tint[1] * .70, tint[2] * .68];
-  const vest  = [tint[0] * .52, tint[1] * .56, tint[2] * .54];
-  const strap = [.14, .15, .14];
-  const boot  = [.13, .12, .12];
-  const glass = d.optic;
+  const gear  = [tint[0] * .34, tint[1] * .35, tint[2] * .36];
+  const vest  = [tint[0] * .26, tint[1] * .27, tint[2] * .28];
+  const plate = [.20, .21, .23];                                  // moulded armour
+  const strap = [.09, .09, .09], boot = [.08, .08, .08], glass = d.optic;
   const hot = e.charge > .05 ? .3 + e.charge * 1.2 : .12;
 
-  const P  = (...a) => part(out, e, ...a);
-  const PS = (...a) => { part(out, e, ...a); part(shadowOut, e, ...a); };
+  const P   = (...a) => part(out, e, ...a);
+  const PS  = (...a) => { part(out, e, ...a); part(shadowOut, e, ...a); };
+  const C   = (...a) => partCyl(out, e, ...a);
+  const CS  = (...a) => { partCyl(out, e, ...a); partCyl(shadowOut, e, ...a); };
+  const S   = (...a) => partSph(out, e, ...a);
+  const SS  = (...a) => { partSph(out, e, ...a); partSph(shadowOut, e, ...a); };
 
-  /* Stride is driven by distance actually covered, so idle units stand still. */
   const moved = Math.hypot(e.x - (e.px === undefined ? e.x : e.px), e.z - (e.pz === undefined ? e.z : e.pz));
   e.px = e.x; e.pz = e.z;
   if (!e.fall) e.gait = (e.gait || 0) + Math.min(moved, .12) * (d.melee ? 22 : 15);
@@ -4531,161 +4755,196 @@ function buildHuman(out, shadowOut, e, t) {
   const speed = Math.min(1, moved * 34);
   const lean = speed * (d.melee ? .26 : .13);
   const breathe = Math.sin(t * 1.7 + e.seed) * .008 * (1 - speed);
+  const twist = Math.sin(ph) * .06 * speed;                       // shoulders counter the hips
 
   /* ---- legs: hip -> thigh -> shin -> boot ------------------------------- */
   function leg(side, hipY, phase, thighL, shinL, w) {
     const hipA = Math.sin(phase) * (.42 + speed * .30);
     const kneeA = Math.max(0, Math.sin(phase + 1.25)) * (.55 + speed * .55) + .06;
     const ca = Math.cos(hipA), sa = Math.sin(hipA);
-    PS(side, hipY - thighL / 2 * ca, -thighL / 2 * sa, w, thighL, w * .96, cloth, T_CLOTH, 0, .12, hipA);
+    S(side, hipY, 0, w * .62, w * .58, w * .62, cloth, T_CLOTH, 0, .12);                   // hip joint
+    CS(side, hipY - thighL / 2 * ca, -thighL / 2 * sa, w * .48, w * .62, thighL, cloth, T_CLOTH, 0, .12, hipA, .92);
     const kx = side, ky = hipY - thighL * ca, kz = -thighL * sa;
+    S(kx, ky, kz, w * .50, w * .48, w * .50, cloth, T_CLOTH, 0, .12);                       // knee
     const shinA = hipA - kneeA;
     const cb = Math.cos(shinA), sb = Math.sin(shinA);
-    PS(kx, ky - shinL / 2 * cb, kz - shinL / 2 * sb, w * .84, shinL, w * .82, cloth, T_CLOTH, 0, .12, shinA);
-    /* Boot, ankle-deep and slightly toed-out. */
+    /* Knee pad sits on the front of the joint; the shin guard follows the shin. */
+    P(kx, ky + .01, kz + w * .42, w * .95, w * 1.05, w * .40, plate, T_GEAR, 0, .34, shinA * .5);
+    CS(kx, ky - shinL / 2 * cb, kz - shinL / 2 * sb, w * .38, w * .50, shinL, cloth, T_CLOTH, 0, .12, shinA, .92);
+    P(kx, ky - shinL * .48 * cb, kz - shinL * .48 * sb + w * .40, w * .80, shinL * .78, w * .34, plate, T_GEAR, 0, .34, shinA);
+    for (const k of [.30, .62]) P(kx, ky - shinL * k * cb, kz - shinL * k * sb, w * 1.0, .035, w * 1.05, strap, T_STRAP, 0, .18, shinA);
     const ax = kx, ay = ky - shinL * cb, az = kz - shinL * sb;
-    P(ax, ay + .04, az, w * .92, .14, w * 1.05, boot, T_LEATHER, 0, .38, shinA * .4);
-    P(ax, ay - .035, az + w * .55, w * .95, .07, w * 1.55, boot, T_LEATHER, 0, .30);
+    C(ax, ay + .05, az, w * .46, w * .42, .14, boot, T_LEATHER, 0, .36, shinA * .4);        // ankle
+    P(ax, ay - .035, az + w * .55, w * .95, .07, w * 1.55, boot, T_LEATHER, 0, .30);        // sole
+    P(ax, ay + .02, az + w * .58, w * .86, .09, w * 1.40, boot, T_LEATHER, 0, .30);         // upper
     return [ax, ay, az];
   }
   /* ---- arms: shoulder -> upper -> forearm -> hand ----------------------- */
-  function arm(side, shY, phase, upL, foreL, w, tuck, sleeveShort) {
+  function arm(side, shY, phase, upL, foreL, w, tuck, bare) {
     const a1 = Math.sin(phase) * (.22 + speed * .22) + tuck;
     const ca = Math.cos(a1), sa = Math.sin(a1);
-    P(side, shY + .03, 0, w * 1.5, w * 1.35, w * 1.45, gear, T_GEAR, 0, .16);       // shoulder pad
-    PS(side, shY - upL / 2 * ca, -upL / 2 * sa, w, upL, w * .95, cloth, T_CLOTH, 0, .12, a1);
+    S(side, shY + .02, 0, w * 1.55, w * 1.35, w * 1.5, gear, T_GEAR, 0, .16);              // shoulder
+    CS(side, shY - upL / 2 * ca, -upL / 2 * sa, w * .78, w * .98, upL, cloth, T_CLOTH, 0, .12, a1);
     const ex = side, ey = shY - upL * ca, ez = -upL * sa;
+    S(ex, ey, ez, w * .80, w * .76, w * .80, cloth, T_CLOTH, 0, .12);                       // elbow
+    P(ex, ey, ez - w * .55, w * 1.15, w * 1.1, w * .5, plate, T_GEAR, 0, .3, a1);             // elbow pad
     const a2 = a1 - .5 - tuck * .55;
     const cb = Math.cos(a2), sb = Math.sin(a2);
-    PS(ex, ey - foreL / 2 * cb, ez - foreL / 2 * sb, w * .88, foreL, w * .86,
-       sleeveShort ? skin : cloth, T_CLOTH, 0, sleeveShort ? .10 : .12, a2);
+    CS(ex, ey - foreL / 2 * cb, ez - foreL / 2 * sb, w * .62, w * .80, foreL,
+       bare ? skin : cloth, bare ? T_SKIN : T_CLOTH, 0, bare ? .10 : .12, a2);
     const hx = ex, hy = ey - foreL * cb, hz = ez - foreL * sb;
-    P(hx, hy - .04, hz, w * .92, .13, w * 1.05, [.16,.16,.16], T_LEATHER, 0, .2, a2);  // glove
+    S(hx, hy - .03, hz, w * .58, w * .74, w * .52, [.16,.16,.16], T_LEATHER, 0, .2, a2);     // gloved hand
     return [hx, hy, hz];
   }
   /* ---- head, with whatever is on it ------------------------------------ */
   function head(hy, lid) {
     const look = clamp(Math.atan2((player.y - .2) - (e.y + hy),
                                   Math.hypot(player.x - e.x, player.z - e.z)), -.35, .35);
-    P(0, hy - .17, 0, .13, .14, .13, skin, T_SKIN, 0, .1);                          // neck
-    PS(0, hy, .01, .21, .25, .23, skin, T_SKIN, 0, .1, -look * .6);                 // skull
-    P(0, hy - .045, .115, .17, .10, .04, [skin[0]*.85, skin[1]*.8, skin[2]*.78], T_SKIN, 0, .1, -look * .6);
+    const tl = -look * .6;
+    C(0, hy - .17, 0, .062, .058, .12, skin, T_SKIN, 0, .1);                                 // neck
+    SS(0, hy, .01, .105, .126, .112, skin, T_SKIN, 0, .10, tl);                             // skull
+    S(0, hy - .05, .075, .075, .058, .055, [skin[0]*.92, skin[1]*.86, skin[2]*.84], T_SKIN, 0, .1, tl); // jaw
+    P(0, hy - .015, .112, .022, .028, .02, [skin[0]*.9, skin[1]*.82, skin[2]*.8], T_SKIN, 0, .1, tl);  // nose
     if (lid === 'helmet' || lid === 'heavy') {
       const big = lid === 'heavy';
-      PS(0, hy + .075, .005, big ? .275 : .245, big ? .19 : .165, big ? .285 : .255, gear, T_GEAR, 0, .30, -look * .6);
-      P(0, hy + .015, .015, big ? .285 : .255, .06, big ? .295 : .265, gear, T_GEAR, 0, .30, -look * .6);
-      /* Visor across the eyes - the only glow a person gets. */
-      P(0, hy + .015, .118, .20, .065, .03, glass, 15, hot, .9, -look * .6);
-      P(-.13, hy + .05, .02, .035, .08, .10, strap, T_STRAP, 0, .2);                 // rail mount
-      if (big) P(.135, hy + .055, .03, .05, .09, .12, strap, T_STRAP, 0, .25);
+      SS(0, hy + .045, 0, big ? .142 : .128, big ? .128 : .112, big ? .148 : .134, gear, T_GEAR, 0, .30, tl, -.10, 1);
+      C(0, hy + .015, .01, big ? .146 : .132, big ? .150 : .136, .045, gear, T_GEAR, 0, .30, tl, 1.02); // brim
+      if (d.boss) {
+        /* Sealed helmet: one broad angled visor and a jaw guard. */
+        P(0, hy + .02, .125, .21, .075, .03, glass, 15, hot * 1.2, .95, tl);
+        P(0, hy - .06, .11, .19, .08, .05, plate, T_GEAR, 0, .34, tl);
+        for (const sgn of [-1, 1]) P(sgn * .12, hy + .01, .09, .03, .07, .08, plate, T_GEAR, 0, .3, tl);
+      } else if (big) {
+        /* Respirator: two filter cans and a lens band above them. */
+        P(0, hy + .02, .118, .19, .05, .028, glass, 15, hot, .95, tl);
+        C(0, hy - .05, .12, .055, .05, .06, plate, T_GEAR, 0, .3, Math.PI / 2 + tl);
+        for (const sgn of [-1, 1]) C(sgn * .075, hy - .07, .10, .038, .034, .05, [.16,.17,.18], T_GEAR, 0, .3, Math.PI / 2 + tl);
+        P(0, hy - .10, .06, .17, .05, .10, [.10,.10,.10], T_STRAP, 0, .2, tl);
+      } else {
+        /* Goggles: two lenses in a rubber frame, strap round the helmet. */
+        P(0, hy + .015, .112, .19, .052, .03, [.06,.06,.06], T_LEATHER, 0, .25, tl);
+        for (const sgn of [-1, 1]) P(sgn * .048, hy + .015, .128, .062, .038, .012, glass, 15, hot, .95, tl);
+        P(0, hy + .015, -.02, .24, .04, .24, strap, T_STRAP, 0, .18, tl);
+        P(0, hy - .085, .095, .14, .06, .05, [skin[0]*.85, skin[1]*.8, skin[2]*.78], T_SKIN, 0, .1, tl); // mouth/chin
+      }
+      P(-.13, hy + .05, .02, .035, .07, .09, strap, T_STRAP, 0, .2);                         // rail
+      P(.13, hy + .06, .0, .03, .05, .08, [.08,.08,.08], T_STRAP, 0, .2);
+      if (big) P(.135, hy + .055, .03, .05, .08, .11, strap, T_STRAP, 0, .25);
+      P(0, hy - .08, .09, .06, .10, .012, strap, T_STRAP, 0, .2, tl);                        // chin strap
     } else if (lid === 'hood') {
-      PS(0, hy + .045, -.01, .255, .21, .27, cloth, T_CLOTH, 0, .10, -look * .6);
-      P(0, hy - .02, .10, .175, .13, .06, [.08,.08,.09], T_CLOTH, 0, .1, -look * .6); // shadowed face
-      P(0, hy + .005, .125, .13, .05, .025, glass, 15, hot * .8, .8, -look * .6);
-      P(0, hy - .07, -.13, .20, .16, .10, cloth, T_CLOTH, 0, .10);                    // hood bunched at the neck
+      SS(0, hy + .03, -.02, .134, .128, .142, cloth, T_CLOTH, 0, .10, tl, -.25, 1);
+      P(0, hy - .02, .10, .16, .12, .05, [.08,.08,.09], T_CLOTH, 0, .1, tl);                 // shadowed face
+      for (const sgn of [-1, 1]) P(sgn * .045, hy + .005, .125, .055, .035, .014, glass, 15, hot * .9, .9, tl);
+      P(0, hy + .005, .11, .16, .048, .028, [.06,.06,.06], T_LEATHER, 0, .25, tl);
+      C(0, hy - .10, -.06, .13, .10, .10, cloth, T_CLOTH, 0, .10, 0, 1.1);                   // bunched hood
     } else if (lid === 'cap') {
-      PS(0, hy + .085, 0, .225, .085, .235, gear, T_GEAR, 0, .18, -look * .6);
-      P(0, hy + .055, .145, .21, .045, .11, gear, T_GEAR, 0, .18, -look * .6);       // peak
-      P(0, hy - .035, .02, .225, .12, .245, cloth, T_CLOTH, 0, .12, -look * .6);      // scrim round the face
-      P(0, hy + .015, .118, .155, .05, .03, glass, 15, hot * .7, .9, -look * .6);
+      SS(0, hy + .06, -.005, .118, .075, .124, gear, T_GEAR, 0, .18, tl, .05, 1);
+      P(0, hy + .06, .14, .19, .04, .10, gear, T_GEAR, 0, .18, tl);                          // peak
+      C(0, hy - .03, .02, .118, .112, .12, cloth, T_CLOTH, 0, .12, tl, 1.05);                // scrim
+      P(0, hy + .012, .118, .15, .045, .026, glass, 15, hot * .7, .9, tl);
     }
   }
-  /* ---- a rifle, carried in both hands ----------------------------------- */
+  /* ---- a rifle in both hands ------------------------------------------- */
   function rifle(hx, hy, hz, len, kind) {
     const dark = [.13,.14,.14], met = [.30,.32,.32];
-    P(hx, hy + .06, hz + .10, .07, .09, len * .42, dark, T_GUN, 0, .35, -.05);      // receiver
-    P(hx, hy + .12, hz + .02, .045, .04, len * .34, met, T_GUN, 0, .5, -.05);       // rail
-    P(hx, hy + .04, hz + len * .46, .05, .05, len * .40, met, T_GUN, 0, .55, -.05); // barrel
-    P(hx, hy - .02, hz + .16, .05, .16, .09, dark, T_GUN, 0, .3);                   // magazine
-    P(hx, hy + .06, hz - len * .30, .06, .11, len * .26, dark, T_GUN, 0, .3, -.05); // stock
+    P(hx, hy + .06, hz + .10, .07, .09, len * .42, dark, T_GUN, 0, .35, -.05);
+    P(hx, hy + .12, hz + .02, .045, .04, len * .34, met, T_GUN, 0, .5, -.05);
+    C(hx, hy + .04, hz + len * .46, .022, .022, len * .40, met, T_GUN, 0, .55, Math.PI / 2 - .05);
+    P(hx, hy - .02, hz + .16, .05, .16, .09, dark, T_GUN, 0, .3);
+    P(hx, hy + .06, hz - len * .30, .06, .11, len * .26, dark, T_GUN, 0, .3, -.05);
     if (kind === 'dmr') {
-      P(hx, hy + .17, hz + .04, .05, .05, .22, dark, T_GUN, 0, .4, -.05);           // scope
+      C(hx, hy + .17, hz + .04, .026, .026, .22, dark, T_GUN, 0, .4, Math.PI / 2 - .05);
       P(hx, hy + .17, hz + .16, .06, .06, .02, [.35,.55,.5], 4, .1, .9, -.05);
     }
-    if (kind === 'shotgun') P(hx, hy - .01, hz + len * .40, .045, .045, len * .34, met, T_GUN, 0, .5, -.05);
+    if (kind === 'shotgun') C(hx, hy - .01, hz + len * .40, .02, .02, len * .34, met, T_GUN, 0, .5, Math.PI / 2 - .05);
+  }
+  /* ---- torso: waist to chest, with the counter-twist ------------------- */
+  function torso(hipY, chestY, waistR, chestR, depth) {
+    const h = chestY - hipY;
+    CS(0, hipY + h / 2, lean * .3, waistR, chestR, h, cloth, T_CLOTH, 0, .12, lean, depth);
+    S(0, chestY + .04, lean * .5, chestR * 1.04, .11, chestR * depth * 1.02, cloth, T_CLOTH, 0, .12, lean); // shoulders line
   }
 
   switch (e.type) {
     /* ------------------------------------------------ RUNNER: light, fast */
     case 'rusher': {
-      leg(-.13, .84, ph,            .40, .38, .125);
-      leg( .13, .84, ph + Math.PI,  .40, .38, .125);
-      PS(0, .90, lean * .25, .30, .19, .21, cloth, T_CLOTH, 0, .12);                  // hips
-      PS(0, 1.14, lean * .5, .38, .40, .26, cloth, T_CLOTH, 0, .12, lean);            // chest
-      P(0, 1.14, lean * .5 + .135, .32, .30, .05, vest, T_GEAR, 0, .18, lean);       // light rig
+      leg(-.12, .84, ph,            .40, .38, .125);
+      leg( .12, .84, ph + Math.PI,  .40, .38, .125);
+      C(0, .88, 0, .16, .15, .16, cloth, T_CLOTH, 0, .12, 0, .78);                         // hips
+      torso(.90, 1.30, .155, .185, .70);
+      P(0, 1.12, lean * .5 + .135, .30, .28, .04, vest, T_GEAR, 0, .18, lean);              // light rig
       for (const s of [-1, 1]) P(s * .10, 1.20, lean * .5 + .15, .045, .24, .03, strap, T_STRAP, 0, .15, lean);
       head(1.42 + breathe, 'hood');
-      const L = arm(-.24, 1.28, ph + Math.PI, .26, .25, .075, .35, true);
-      const R = arm( .24, 1.28, ph,           .26, .25, .075, .55, true);
-      /* Blade in the right hand. */
-      P(R[0], R[1] - .02, R[2] + .22, .035, .05, .40, [.55,.57,.56], T_GUN, 0, .85, -.35);
+      arm(-.22, 1.30, ph + Math.PI + twist, .26, .25, .075, .35, true);
+      const R = arm( .22, 1.30, ph - twist, .26, .25, .075, .55, true);
+      P(R[0], R[1] - .02, R[2] + .22, .035, .05, .40, [.55,.57,.56], T_GUN, 0, .85, -.35);  // blade
       P(R[0], R[1] + .02, R[2] + .06, .05, .07, .10, [.10,.10,.10], T_GUN, 0, .2);
       break;
     }
     /* ----------------------------------------- BREACHER: armoured, shield */
     case 'heavy': {
-      leg(-.20, 1.00, ph,           .48, .44, .175);
-      leg( .20, 1.00, ph + Math.PI, .48, .44, .175);
-      PS(0, 1.06, 0, .46, .24, .30, cloth, T_CLOTH, 0, .12);
-      PS(0, 1.40, 0, .60, .52, .36, cloth, T_CLOTH, 0, .12, lean);
-      /* Heavy plate carrier with visible plates and pouches. */
-      PS(0, 1.42, .19, .56, .50, .12, vest, T_GEAR, 0, .22, lean);
-      P(0, 1.55, .25, .42, .20, .04, gear, T_GEAR, 0, .26, lean);
-      for (let i = 0; i < 3; i++) P(-.18 + i * .18, 1.24, .24, .13, .12, .07, gear, T_GEAR, 0, .2, lean);
-      P(0, 1.42, -.22, .50, .46, .12, gear, T_GEAR, 0, .2, lean);                    // back plate
-      P(0, 1.60, -.28, .34, .26, .14, cloth, T_CLOTH, 0, .15);                        // pack
+      leg(-.19, 1.00, ph,           .48, .44, .175);
+      leg( .19, 1.00, ph + Math.PI, .48, .44, .175);
+      C(0, 1.04, 0, .24, .23, .22, cloth, T_CLOTH, 0, .12, 0, .72);
+      torso(1.06, 1.66, .23, .30, .66);
+      PS(0, 1.42, .21, .56, .50, .12, vest, T_GEAR, 0, .22, lean);                          // plate carrier
+      P(0, 1.46, .28, .42, .32, .03, plate, T_GEAR, 0, .40, lean);
+      for (const sgn of [-1, 1]) S(sgn * .38, 1.68, 0, .17, .12, .19, plate, T_GEAR, 0, .36);  // pauldrons
+      P(0, 1.55, .27, .42, .20, .04, gear, T_GEAR, 0, .26, lean);
+      for (let i = 0; i < 3; i++) P(-.18 + i * .18, 1.24, .26, .13, .12, .07, gear, T_GEAR, 0, .2, lean);
+      P(0, 1.42, -.24, .50, .46, .12, gear, T_GEAR, 0, .2, lean);
+      P(0, 1.60, -.30, .34, .26, .14, cloth, T_CLOTH, 0, .15);                              // pack
       head(1.90 + breathe, 'heavy');
-      arm(-.38, 1.62, ph * .3 + Math.PI, .30, .28, .105, .55);
-      const R = arm(.38, 1.62, ph * .3, .30, .28, .105, .70);
+      arm(-.36, 1.64, ph * .3 + Math.PI, .30, .28, .105, .55);
+      const R = arm(.36, 1.64, ph * .3, .30, .28, .105, .70);
       rifle(R[0] - .06, R[1], R[2], .62, 'shotgun');
-      /* Riot shield strapped to the left forearm. */
-      P(-.42, 1.38, .34, .52, .78, .06, [.24,.26,.28], T_GEAR, 0, .45, lean * .5);
+      P(-.42, 1.38, .34, .52, .78, .06, [.24,.26,.28], T_GEAR, 0, .45, lean * .5);           // riot shield
       P(-.42, 1.52, .38, .34, .28, .02, [.30,.42,.44], 4, .06, .85, lean * .5);
       P(-.42, 1.38, .30, .10, .30, .05, strap, T_STRAP, 0, .2);
       break;
     }
     /* ------------------------------------------- MARKSMAN: long rifle, scrim */
     case 'sniper': {
-      leg(-.13, .90, ph,           .46, .42, .125);
-      leg( .13, .90, ph + Math.PI, .46, .42, .125);
-      PS(0, .96, 0, .30, .20, .22, cloth, T_CLOTH, 0, .12);
-      PS(0, 1.22, 0, .40, .44, .27, cloth, T_CLOTH, 0, .12, lean);
-      P(0, 1.22, .14, .36, .38, .05, vest, T_GEAR, 0, .18, lean);
-      P(0, 1.34, -.17, .30, .30, .12, cloth, T_CLOTH, 0, .12);                        // pack
-      /* Scrim strips on the shoulders break the outline. */
-      for (let i = 0; i < 5; i++) {
+      leg(-.12, .90, ph,           .46, .42, .125);
+      leg( .12, .90, ph + Math.PI, .46, .42, .125);
+      C(0, .94, 0, .16, .155, .18, cloth, T_CLOTH, 0, .12, 0, .76);
+      torso(.96, 1.44, .16, .20, .68);
+      P(0, 1.22, .15, .34, .36, .04, vest, T_GEAR, 0, .18, lean);
+      P(0, 1.34, -.19, .30, .30, .12, cloth, T_CLOTH, 0, .12);                              // pack
+      for (let i = 0; i < 5; i++) {                                                          // scrim
         const a = (i / 5) * TAU + e.seed;
         P(Math.sin(a) * .18, 1.36 - (i % 3) * .05, Math.cos(a) * .12, .07, .13, .04,
           [cloth[0] * 1.3, cloth[1] * 1.25, cloth[2] * .9], T_CLOTH, 0, .08, a);
       }
       head(1.56 + breathe, 'cap');
-      arm(-.22, 1.34, ph * .25 + Math.PI, .28, .27, .08, .60);
-      const R = arm(.22, 1.34, ph * .25, .28, .27, .08, .85);
+      arm(-.21, 1.36, ph * .25 + Math.PI, .28, .27, .08, .60);
+      const R = arm(.21, 1.36, ph * .25, .28, .27, .08, .85);
       rifle(R[0] - .04, R[1] + .02, R[2], .82, 'dmr');
       if (e.charge > .02) P(R[0] - .04, R[1] + .06, R[2] + .48, .04, .04, .06, [1,.35,.3], 15, 1.2 + e.charge);
       break;
     }
     /* ------------------------------ WARDEN: heavy assault suit, power cells */
     case 'warden': {
-      leg(-.44, 1.70, ph * .7,           .86, .78, .30);
-      leg( .44, 1.70, ph * .7 + Math.PI, .86, .78, .30);
-      PS(0, 1.80, 0, .96, .40, .60, cloth, T_CLOTH, 0, .14);
-      PS(0, 2.40, 0, 1.22, .90, .70, cloth, T_CLOTH, 0, .14, lean);
-      PS(0, 2.42, .38, 1.16, .86, .18, vest, T_GEAR, 0, .28, lean);                  // chest armour
-      P(0, 2.66, .46, .80, .28, .05, gear, T_GEAR, 0, .32, lean);
-      P(0, 2.40, -.40, 1.02, .80, .18, gear, T_GEAR, 0, .22, lean);
-      P(0, 2.86, -.48, .60, .44, .22, cloth, T_CLOTH, 0, .15);                        // powered pack
+      leg(-.42, 1.70, ph * .7,           .86, .78, .30);
+      leg( .42, 1.70, ph * .7 + Math.PI, .86, .78, .30);
+      C(0, 1.76, 0, .50, .48, .36, cloth, T_CLOTH, 0, .14, 0, .66);
+      torso(1.80, 2.86, .50, .62, .62);
+      PS(0, 2.42, .40, 1.16, .86, .18, vest, T_GEAR, 0, .28, lean);                         // chest armour
+      P(0, 2.50, .50, .84, .50, .04, plate, T_GEAR, 0, .42, lean);
+      P(0, 2.52, .53, .40, .08, .02, glass, 15, .9, .9, lean);                                 // chest light
+      P(0, 2.66, .48, .80, .28, .05, gear, T_GEAR, 0, .32, lean);
+      P(0, 2.40, -.42, 1.02, .80, .18, gear, T_GEAR, 0, .22, lean);
+      P(0, 2.86, -.50, .60, .44, .22, cloth, T_CLOTH, 0, .15);                              // powered pack
       head(3.16 + breathe, 'heavy');
       for (const s of [-1, 1]) {
-        PS(s * .74, 2.72, -.02, .34, .40, .48, gear, T_GEAR, 0, .26);                // pauldrons
+        S(s * .74, 2.72, -.02, .28, .24, .30, gear, T_GEAR, 0, .26);                         // pauldrons
         arm(s * .70, 2.50, ph * .3 + (s > 0 ? 0 : Math.PI), .46, .42, .15, .5);
       }
       rifle(.62, 2.14, .0, .95, 'shotgun');
-      /* Three exposed power cells: the suit's weak points. */
       for (const c of e.cores) {
         const a = e.yaw + c.a + t * .3;
         const cx = Math.sin(a) * 1.05, cz = Math.cos(a) * 1.05;
-        box(out, e.x + cx, e.y + c.y, e.z + cz, .26, .34, .20,
+        cyl(out, e.x + cx, e.y + c.y, e.z + cz, .12, .12, .30,
             c.broken ? [.12,.12,.12] : [1, .52, .16], 15, c.broken ? 0 : 2.3, a, 0, .7);
         box(out, e.x + cx, e.y + c.y, e.z + cz, .34, .42, .12, [.22,.24,.24], T_GEAR, 0, a, 0, .4);
       }
@@ -4693,26 +4952,27 @@ function buildHuman(out, shadowOut, e, t) {
     }
     /* ---------------------------------------------- PATROL: the line trooper */
     default: {
-      leg(-.15, .88, ph,           .44, .40, .14);
-      leg( .15, .88, ph + Math.PI, .44, .40, .14);
-      PS(0, .94, 0, .34, .21, .24, cloth, T_CLOTH, 0, .12);
-      PS(0, 1.20, 0, .44, .46, .28, cloth, T_CLOTH, 0, .12, lean);
-      /* Plate carrier, magazine pouches, shoulder straps. */
-      PS(0, 1.21, .155, .40, .42, .09, vest, T_GEAR, 0, .20, lean);
-      for (let i = 0; i < 3; i++) P(-.12 + i * .12, 1.08, .20, .10, .11, .06, gear, T_GEAR, 0, .18, lean);
-      P(0, 1.36, .19, .26, .10, .05, gear, T_GEAR, 0, .2, lean);
+      leg(-.14, .88, ph,           .44, .40, .14);
+      leg( .14, .88, ph + Math.PI, .44, .40, .14);
+      C(0, .92, 0, .18, .175, .18, cloth, T_CLOTH, 0, .12, 0, .76);                        // hips / belt line
+      P(0, .93, 0, .38, .05, .30, strap, T_STRAP, 0, .2);                                   // belt
+      torso(.94, 1.44, .175, .215, .68);
+      PS(0, 1.21, .16, .40, .42, .09, vest, T_GEAR, 0, .20, lean);                          // plate carrier
+      P(0, 1.24, .21, .30, .26, .03, plate, T_GEAR, 0, .38, lean);                            // front plate
+      for (const sgn of [-1, 1]) P(sgn * .24, 1.30, .04, .10, .16, .22, plate, T_GEAR, 0, .3, lean); // shoulder cups
+      for (let i = 0; i < 3; i++) P(-.12 + i * .12, 1.08, .21, .10, .11, .06, gear, T_GEAR, 0, .18, lean);
+      P(0, 1.36, .20, .26, .10, .05, gear, T_GEAR, 0, .2, lean);
       for (const s of [-1, 1]) P(s * .13, 1.38, .10, .06, .16, .16, vest, T_GEAR, 0, .2, lean);
-      P(0, 1.22, -.17, .38, .40, .07, gear, T_GEAR, 0, .16, lean);                   // back plate
-      P(0, 1.30, -.24, .26, .28, .12, cloth, T_CLOTH, 0, .12);                        // daypack
-      P(.17, 1.02, -.20, .09, .14, .07, gear, T_GEAR, 0, .18);                       // canteen
+      P(0, 1.22, -.18, .38, .40, .07, gear, T_GEAR, 0, .16, lean);
+      P(0, 1.30, -.25, .26, .28, .12, cloth, T_CLOTH, 0, .12);                              // daypack
+      C(.17, 1.02, -.20, .045, .045, .14, gear, T_GEAR, 0, .18);                             // canteen
       head(1.53 + breathe, 'helmet');
-      arm(-.26, 1.36, ph + Math.PI, .27, .26, .085, .55);
-      const R = arm(.26, 1.36, ph, .27, .26, .085, .78);
+      arm(-.25, 1.38, ph + Math.PI + twist, .27, .26, .085, .55);
+      const R = arm(.25, 1.38, ph - twist, .27, .26, .085, .78);
       rifle(R[0] - .05, R[1] + .01, R[2], .66, 'rifle');
       break;
     }
   }
-  /* Wounded units bleed smoke from their gear, not sparks. */
   if (!e.fall && hurt < .4 && Math.random() < .25)
     smoke(e.x + rand(.2, -.2), e.y + d.body + rand(.3, -.1), e.z + rand(.2, -.2), [.30,.28,.26], 1, .12, .5);
 }
@@ -4726,17 +4986,16 @@ function buildDroneUnit(out, shadowOut, e, t) {
   const P  = (...a) => part(out, e, ...a);
   const PS = (...a) => { part(out, e, ...a); part(shadowOut, e, ...a); };
   const spin = t * 30 + e.seed;
-  PS(0, 0, 0, .46, .30, .52, col, 7, 0, .55);
-  P(0, .02, .27, .34, .18, .06, [.05,.06,.07], 5, 0, .3);
-  P(0, .02, .30, .22, .09, .03, optic, 15, hot * 1.8);
-  P(0, .17, -.04, .34, .06, .40, mid, 7, 0, .6);
+  partSph(out, e, 0, 0, 0, .24, .15, .27, col, 7, 0, .55);
+  partSph(shadowOut, e, 0, 0, 0, .24, .15, .27, col, 7, 0, .55);
+  P(0, .02, .27, .30, .16, .06, [.05,.06,.07], 5, 0, .3);
+  P(0, .02, .30, .20, .08, .03, optic, 15, hot * 1.8);
   P(0, -.15, 0, .26, .10, .30, dark, 7, 0, .4);
-  P(0, -.24, .04, .16, .10, .16, dark, 7, 0, .3);
+  partCyl(out, e, 0, -.24, .04, .07, .08, .10, dark, 7, 0, .3);
   P(0, -.30, .04, .10, .05, .10, optic, 15, hot);
   for (const [ax, az] of [[-1,-1],[1,-1],[-1,1],[1,1]]) {
     P(ax * .28, .07, az * .30, .34, .05, .12, mid, 7, 0, .6);
-    P(ax * .44, .10, az * .46, .30, .09, .30, dark, 7, 0, .5);
-    P(ax * .44, .17, az * .46, .34, .025, .34, [.4,.46,.46], 7, 0, .5);
+    partCyl(out, e, ax * .44, .10, az * .46, .16, .16, .09, dark, 7, 0, .5);                // duct
     const bx = e.x + ax * .44 * Math.cos(e.yaw) + az * .46 * Math.sin(e.yaw);
     const bz = e.z - ax * .44 * Math.sin(e.yaw) + az * .46 * Math.cos(e.yaw);
     const dir = spin * (ax * az > 0 ? 1 : -1);
@@ -4749,8 +5008,11 @@ function buildDroneUnit(out, shadowOut, e, t) {
 }
 
 function buildUnit(out, shadowOut, e, t) {
+  const dist = Math.hypot(e.x - camPos[0], e.z - camPos[2]);
+  ROUND_NOW = dist > 24 ? Math.max(4, ROUND - 3) : dist > 12 ? Math.max(5, ROUND - 2) : ROUND;
   if (e.type === 'drone') buildDroneUnit(out, shadowOut, e, t);
   else buildHuman(out, shadowOut, e, t);
+  ROUND_NOW = ROUND;
 }
 
 /* The dead stay where they fell, collapsing under their own weight. */
@@ -4822,6 +5084,15 @@ function buildDynamic(t) {
     }
     box(dynData, g.x, g.y + .02, g.z, .155, .045, .155, [1, .38, .18], 15, blink, g.spin);
     box(dynShadow, g.x, g.y, g.z, .18, .20, .18, [.3, .3, .3], 7, 0, g.spin);
+  }
+  for (const r of rockets) {
+    const rot = Math.PI - r.yaw, tilt = -r.pitch;
+    box(dynData, r.x, r.y, r.z, .095, .095, .52, [.42, .45, .40], 21, 0, rot, 0, .5, 0, tilt);
+    box(dynData, r.x, r.y, r.z, .13, .13, .18, [.36, .38, .34], 21, 0, rot, 0, .5, 0, tilt);   // warhead
+    for (let k = 0; k < 4; k++) {
+      const a = k * Math.PI / 2 + r.age * 14;
+      box(dynData, r.x + Math.cos(a) * .07, r.y + Math.sin(a) * .07, r.z, .03, .12, .14, [.3, .3, .28], 21, 0, rot, 0, .4, 0, tilt);
+    }
   }
   for (const b of bolts) box(dynData, b.x, b.y, b.z, .11, .11, .11, b.c, 15, 2.6);
 }
@@ -5006,6 +5277,12 @@ function buildFx(t, dt) {
     fxSprite(p.x, p.y - .42, p.z, 1.3, c, .12);
   }
   for (const g of grenades) fxSprite(g.x, g.y, g.z, .4, [1, .5, .2], g.fuse < .5 ? .8 : .35);
+  for (const r of rockets) {
+    const sp = Math.hypot(r.vx, r.vy, r.vz) || 1;
+    const tx = r.x - r.vx / sp * .32, ty = r.y - r.vy / sp * .32, tz = r.z - r.vz / sp * .32;
+    fxSprite(tx, ty, tz, .55 + Math.random() * .15, [1, .7, .3], .9);
+    fxBeam([tx, ty, tz], [tx - r.vx / sp * 1.2, ty - r.vy / sp * 1.2, tz - r.vz / sp * 1.2], .12, [1, .55, .2], .5, 2);
+  }
   /* Cache beacons punch a column of light through the ceiling so they read
      from anywhere in the station. */
   for (const c of caches) {
@@ -5096,7 +5373,81 @@ function buildWeapon(t, dt) {
     B( .028, h + .030, z - .30, .010, .042, .010, dark, 5, 0, .4);
   }
 
-  if (w.id === 'ar') {
+  if (w.id === 'smg') {
+    /* ---- MP-9 machine pistol ------------------------------------------- */
+    B(0, 0, .04, .068, .085, .23, poly, 7, 0, .35);                       // receiver
+    B(0, .052, .02, .056, .040, .27, park, 7, 0, .55);
+    B(.036, .048, .06, .010, .030, .06, dark, 5, 0, .4);                  // port
+    railTop(-.03, .22, .078);
+    B(0, .012, -.20, .038, .038, .15, steel, 7, 0, .75);                  // short barrel
+    B(0, .012, -.285, .050, .050, .045, park, 7, 0, .6);                  // suppressor cap
+    B(0, -.032, -.06, .058, .062, .10, park, 7, 0, .5);                   // foregrip block
+    B(0, -.098, -.06, .040, .080, .045, grip, 7, 0, .3);                  // vertical grip
+    B(0, .104, -.04, .044, .040, .07, dark, 7, 0, .45);                   // micro red dot
+    B(0, .104, -.078, .050, .050, .010, [.25,.42,.40], 4, .12, .9);
+    B(0, .104, -.075, .014, .014, .005, [1,.28,.2], 15, 1.6);
+    const magDrop = rlT >= 0 ? (rlT < .42 ? rlT / .42 : 0) : 0;
+    const magIn   = rlT >= .5 ? Math.min(1, (rlT - .5) / .35) : (rlT >= 0 ? 0 : 1);
+    if (magDrop < .95 || magIn > .02)
+      B(-.004, -.16 - magDrop * .4 + (1 - magIn) * .3, .10, .040, .19, .062, poly, 7, 0, .35);   // long stick mag
+    B(-.004, -.11, .10, .050, .12, .075, grip, 7, 0, .3);                 // grip is the magwell
+    B(0, -.050, .06, .046, .012, .05, park, 7, 0, .5);
+    B(0, .02, .21, .050, .060, .12, poly, 7, 0, .35);                     // folding stock, folded
+    B(0, -.04, .27, .06, .02, .09, park, 7, 0, .5);
+    hands(.10, -.06, -.06);
+    if (flash > 0) B(0, .012, -.34, .08 * flash, .08 * flash, .09 * flash, [1,.85,.5], 15, 3.2);
+  } else if (w.id === 'mg') {
+    /* ---- GAU-2 rotary cannon --------------------------------------------- */
+    const spin = P.spin, ang = (t * 26 * spin) % TAU;
+    B(0, -.02, .16, .13, .16, .34, park, 7, 0, .5);                        // housing
+    B(0, .07, .16, .10, .05, .30, dark, 7, 0, .45);
+    B(0, -.12, .06, .12, .06, .18, poly, 7, 0, .35);                       // feed chute
+    B(-.10, -.02, .26, .06, .14, .12, dark, 7, 0, .4);                     // ammo box
+    for (let i = 0; i < 12; i++) B(-.10, -.06 + i * .008, .20 - i * .006, .012, .006, .04, brass, 15, 0, .9);
+    B(0, -.02, -.12, .10, .10, .22, dark, 7, 0, .5);                       // barrel clamp
+    for (let i = 0; i < 6; i++) {
+      const a = ang + i * TAU / 6, bx = Math.cos(a) * .042, by = -.02 + Math.sin(a) * .042;
+      B(bx, by, -.30, .022, .022, .56, steel, 7, 0, .8);                   // six barrels
+      B(bx, by, -.585, .026, .026, .02, dark, 5, 0, .4);
+    }
+    B(0, -.02, -.40, .036, .036, .04, [.12,.12,.12], 5, 0, .4);            // spindle
+    B(0, -.02, -.585, .10, .10, .012, park, 7, 0, .55);                    // front clamp
+    B(0, .08, -.02, .05, .04, .10, park, 7, 0, .5);                        // sight base
+    B(0, .118, -.04, .012, .04, .012, dark, 5, 0, .4);
+    B(-.004, -.15, .30, .056, .14, .08, grip, 7, 0, .3);                   // rear grip
+    B(.09, -.06, -.02, .06, .04, .10, grip, 7, 0, .3);                     // side handle
+    B(.09, -.04, .02, .05, .09, .03, park, 7, 0, .5);
+    hands(.30, -.02, -.055);
+    if (spin > .03) B(0, -.02, -.42, .06 * spin, .06 * spin, .04, [1, .5, .2], 15, .4 + spin * .6);
+    if (flash > 0) {
+      const a = ang, bx = Math.cos(a) * .042, by = -.02 + Math.sin(a) * .042;
+      B(bx, by, -.66, .09 * flash, .09 * flash, .10 * flash, [1,.8,.42], 15, 3.4);
+    }
+  } else if (w.id === 'rpg') {
+    /* ---- RPG-7 --------------------------------------------------------- */
+    const loaded = P.ammo[P.weapon] > 0 && (rlT < 0 || rlT > .6);
+    B(0, .02, .05, .064, .064, .72, [.36,.34,.30], 7, 0, .45);             // tube
+    B(0, .02, -.30, .085, .085, .09, [.36,.34,.30], 7, 0, .45);            // venturi flare
+    B(0, .02, .36, .11, .11, .09, [.3,.28,.26], 7, 0, .45);                // rear cone
+    B(0, .02, .42, .13, .13, .03, dark, 5, 0, .4);
+    for (const z of [.04, .22]) B(0, -.052, z, .05, .04, .07, [.42,.30,.18], 7, 0, .3);   // wooden heat shields
+    B(0, -.09, .12, .06, .10, .12, [.42,.30,.18], 7, 0, .3);
+    B(0, .10, .02, .05, .05, .12, park, 7, 0, .5);                         // optical sight
+    B(0, .10, -.045, .056, .056, .012, [.25,.42,.40], 4, .12, .9);
+    B(0, .10, .085, .050, .050, .010, [.15,.2,.2], 4, .05, .9);
+    B(-.004, -.11, .28, .052, .115, .075, grip, 7, 0, .3);                 // pistol grip
+    B(0, -.045, .24, .046, .012, .055, park, 7, 0, .5);
+    if (loaded) {
+      B(0, .02, -.44, .075, .075, .22, [.40,.42,.36], 7, 0, .5);           // warhead
+      B(0, .02, -.57, .045, .045, .08, [.36,.38,.34], 7, 0, .5);           // nose
+      B(0, .02, -.615, .02, .02, .02, [.6,.6,.58], 15, 0, .8);
+    }
+    hands(.28, -.10, -.045);
+    if (flash > 0) {
+      B(0, .02, -.66, .16 * flash, .16 * flash, .20 * flash, [1,.74,.35], 15, 3.4);
+      B(0, .02, .52, .14 * flash, .14 * flash, .25 * flash, [1,.6,.3], 15, 2.6);            // backblast
+    }
+  } else if (w.id === 'ar') {
     /* ---- AR-04 service rifle -------------------------------------------- */
     B(0, 0, .075, .072, .095, .30, poly, 7, 0, .35);                     // lower receiver
     B(0, .062, .045, .062, .052, .40, park, 7, 0, .55);                  // upper receiver
@@ -5629,7 +5980,7 @@ function updateHud() {
   for (let i = 0; i < pips.length; i++)
     pips[i].className = i < wave - 1 ? 'on' : (i === wave - 1 ? 'cur' : '');
   const list = $('wep-list');
-  if (list.children.length !== 4) {
+  if (list.children.length !== WEAPONS.length) {
     list.innerHTML = '';
     for (const ww of WEAPONS) {
       const d = document.createElement('div');
@@ -5639,7 +5990,7 @@ function updateHud() {
       list.appendChild(d);
     }
   }
-  for (let i = 0; i < 4; i++)
+  for (let i = 0; i < WEAPONS.length; i++)
     list.children[i].className = 'wep' + (P.owned[i] ? ' have' : '') + (i === P.weapon ? ' on' : '');
 }
 let radarTick = 0;
@@ -5798,6 +6149,8 @@ window.LastTrain = {
   get endless() { return endless; },
   visible(x, z, h) { return lineOfSight(player.x, player.y, player.z, x, floorAt(x, z) + (h || 1), z); },
   weaponName(i) { return WEAPONS[i].name; },
+  weaponCount() { return WEAPONS.length; },
+  get rockets() { return rockets; },
   get upgrades() { return UPGRADES; },
   newMods: freshMods,
   stats() {
