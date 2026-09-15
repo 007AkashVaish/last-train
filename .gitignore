@@ -12,3 +12,6 @@ tmp/
 
 # Local tooling config
 .claude/
+
+.vercel
+.env*
