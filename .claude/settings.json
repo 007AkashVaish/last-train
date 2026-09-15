@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python __TRACKED_VAR__/mobile.py)",
+      "Bash(python -c ' *)"
+    ]
+  }
+}
