@@ -66,7 +66,8 @@ not cost a full frame.
 ### Weapons
 
 Seven, each a full assembly whose bolt rides back on every shot and whose magazine
-physically leaves the well on a reload. They unlock across the campaign:
+physically leaves the well on a reload. All seven are in the locker from the first
+wave — press `1`–`7` or roll the wheel:
 
 | | Weapon | Character |
 | --- | --- | --- |

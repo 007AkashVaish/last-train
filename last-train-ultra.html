@@ -2872,24 +2872,24 @@ const WEAPONS = [
     sound:'ar', tracer:[1,.72,.32], unlock:0 },
   { id:'sg',   key:'2', name:'SG-12',  full:'BREACH SHOTGUN', mag:7,  rof:.62,  reload:1.95, dmg:17, head:1.9,
     pellets:10, spread:.078, adsSpread:.046, kick:.20, shake:.42, range:24, pierce:0, auto:false, zoom:.9,
-    sound:'sg', tracer:[1,.6,.24], unlock:3, knock:2.6 },
+    sound:'sg', tracer:[1,.6,.24], unlock:0, knock:2.6 },
   { id:'rail', key:'3', name:'RAIL-9', full:'RAIL LANCE',     mag:5,  rof:.90,  reload:1.90, dmg:155, head:2.0,
     pellets:1, spread:0, adsSpread:0, kick:.17, shake:.5, range:95, pierce:6, auto:false, zoom:.5,
-    sound:'rail', tracer:[.62,.88,1], unlock:4, beam:true },
+    sound:'rail', tracer:[.62,.88,1], unlock:0, beam:true },
   { id:'arc',  key:'4', name:'ARC-3',  full:'ARC PROJECTOR',  mag:44, rof:.145, reload:1.65, dmg:27, head:1.4,
     pellets:1, spread:.016, adsSpread:.007, kick:.032, shake:.09, range:26, pierce:0, auto:true, zoom:.82,
-    sound:'arc', tracer:[.66,.86,1], unlock:6, chain:3, chainRange:6.4 },
+    sound:'arc', tracer:[.66,.86,1], unlock:0, chain:3, chainRange:6.4 },
   { id:'smg',  key:'5', name:'MP-9',   full:'MACHINE PISTOL',  mag:36, rof:.062, reload:1.15, dmg:19, head:2.4,
     pellets:1, spread:.021, adsSpread:.008, kick:.026, shake:.07, range:34, pierce:0, auto:true, zoom:.86,
-    sound:'smg', tracer:[1,.8,.42], unlock:2 },
+    sound:'smg', tracer:[1,.8,.42], unlock:0 },
   /* The rotary cannon has to spin up, and walking with it is slow. */
   { id:'mg',   key:'6', name:'GAU-2',  full:'ROTARY CANNON',   mag:180, rof:.034, reload:3.6, dmg:15, head:1.5,
     pellets:1, spread:.052, adsSpread:.038, kick:.018, shake:.15, range:60, pierce:1, auto:true, zoom:.96,
-    sound:'mg', tracer:[1,.62,.26], unlock:5, spinup:.85, slow:.55 },
+    sound:'mg', tracer:[1,.62,.26], unlock:0, spinup:.85, slow:.55 },
   /* A projectile, not a ray: the round flies, then everything near it goes. */
   { id:'rpg',  key:'7', name:'RPG-7',  full:'ROCKET LAUNCHER', mag:1, rof:1.1, reload:2.9, dmg:0, head:1,
     pellets:0, spread:0, adsSpread:0, kick:.32, shake:.7, range:0, pierce:0, auto:false, zoom:.72,
-    sound:'rpg', tracer:[1,.7,.3], unlock:7, rocket:true },
+    sound:'rpg', tracer:[1,.7,.3], unlock:0, rocket:true },
 ];
 const WEAPON_BY_ID = {}; WEAPONS.forEach((w, i) => { w.index = i; WEAPON_BY_ID[w.id] = w; });
 
@@ -2984,7 +2984,7 @@ let mods = freshMods();
 const player = {
   x:-5.2, z:24, y:1.66, groundY:0, yaw:.03, pitch:0,
   hp:100, shield:0, weapon:0,
-  owned:WEAPONS.map((w, i) => i === 0), ammo:WEAPONS.map(w => w.mag),
+  owned:WEAPONS.map(() => true), ammo:WEAPONS.map(w => w.mag),
   reload:0, reloadTotal:1, shotTimer:0, recoil:0, recoilYaw:0, recoilPitch:0,
   invuln:0, bob:0, step:0, sprinting:false, ads:0,
   dash:0, dashCd:0, dashX:0, dashZ:0, dashHits:null,
@@ -4105,7 +4105,7 @@ function begin() {
   mods = freshMods();
   Object.assign(player, {
     x:-5.2, z:24, y:1.66, groundY:0, yaw:.03, pitch:0, hp:100, shield:0, weapon:0,
-    owned:WEAPONS.map((w, i) => i === 0), ammo:WEAPONS.map((w, i) => i === 0 ? magSize(w) : w.mag),
+    owned:WEAPONS.map(() => true), ammo:WEAPONS.map(w => magSize(w)),
     reload:0, shotTimer:0, recoil:0, recoilYaw:0, recoilPitch:0, invuln:1.5, bob:0, step:0,
     sprinting:false, ads:0, dash:0, dashCd:0, nades:3, nadeCd:0, combo:1, comboKills:0, comboTimer:0,
     bestCombo:1, regenTimer:0, walking:false, flash:0, strafeAmt:0,
